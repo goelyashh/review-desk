@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; media-src 'self' http://127.0.0.1:*; img-src 'self' data: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>Review Desk</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <!-- LEFT: library -->
+  <aside id="side">
+    <div class="brand"><span class="logo">▶</span> Review Desk</div>
+    <div class="lib">
+      <div class="lib-label">Library</div>
+      <div class="lib-path" id="libPath" title="Library folder"></div>
+      <div class="lib-actions">
+        <button class="btn sm" id="btnOpenLib" title="Open the library folder in Explorer">Open folder</button>
+        <button class="btn sm" id="btnCopyLib" title="Copy the library index path (lists every project, version and notes file)">Copy index path</button>
+        <button class="btn sm ghost" id="btnChangeLib" title="Use a different folder as the library">Change…</button>
+      </div>
+    </div>
+    <button class="btn primary block" id="btnNewProject">+ New project</button>
+    <div class="side-scroll">
+      <div class="sec-title">Recent <button class="link" id="btnClearRecent">clear</button></div>
+      <div id="recentList" class="recent"></div>
+      <div class="sec-title">Projects <input id="projFilter" class="filter" placeholder="Filter"></div>
+      <div id="projectList"></div>
+    </div>
+  </aside>
+
+  <!-- CENTER: player -->
+  <main id="center">
+    <header id="topbar">
+      <div class="crumbs"><span id="crumbProject" class="muted">No video open</span><span id="crumbSep" class="muted"> / </span><span id="crumbVersion"></span></div>
+      <div id="versionChips" class="chips"></div>
+      <div class="top-actions">
+        <button class="btn" id="btnImport" title="Add video files to this project as new versions (or drag files onto the window)">+ Add version</button>
+        <button class="btn" id="btnReveal" title="Show this video in Explorer">Show in folder</button>
+      </div>
+    </header>
+
+    <div id="stage">
+      <div id="frameBox">
+        <video id="video" crossorigin="anonymous" preload="auto" playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div id="empty" class="empty">
+        <div class="empty-card">
+          <h2>Open a version to review</h2>
+          <p>Pick a project on the left, or drag video files here.</p>
+          <p class="muted small">Each folder in the library is a project. Every video file inside it is a version, and the newest one is marked <b>LATEST</b>.</p>
+        </div>
+      </div>
+      <div id="msg" class="msg hidden"></div>
+      <div id="dropHint" class="drop hidden">Drop videos to add them as versions</div>
+    </div>
+
+    <div id="toolsBar">
+      <div class="tools">
+        <button class="tool active" data-tool="none" title="Pointer (V / Esc)">⬉</button>
+        <button class="tool" data-tool="pen" title="Brush (B)">✎</button>
+        <button class="tool" data-tool="rect" title="Rectangle (R)">▭</button>
+        <button class="tool" data-tool="arrow" title="Arrow (A)">➚</button>
+        <span class="vsep"></span>
+        <span id="colors" class="colors"></span>
+        <select id="strokeW" title="Line width"><option value="3">Thin</option><option value="5" selected>Medium</option><option value="9">Thick</option></select>
+        <span class="vsep"></span>
+        <button class="btn sm ghost" id="btnUndo" title="Undo last drawing (Ctrl+Z)">Undo</button>
+        <button class="btn sm ghost" id="btnClearDraw" title="Clear drawings that aren't saved yet">Clear</button>
+      </div>
+      <div id="proxyState" class="muted small"></div>
+    </div>
+
+    <div id="timeline">
+      <div id="track"><div id="buffered"></div><div id="played"></div><div id="markers"></div><div id="head"></div></div>
+    </div>
+
+    <div id="transport">
+      <div class="tleft">
+        <button class="tbtn" id="btnStart" title="First frame (Home)">⏮</button>
+        <button class="tbtn" id="btnBack10" title="Back 10 frames (Shift+←)">«</button>
+        <button class="tbtn" id="btnBack" title="Back 1 frame (←)">‹</button>
+        <button class="tbtn play" id="btnPlay" title="Play / pause (Space)">▶</button>
+        <button class="tbtn" id="btnFwd" title="Forward 1 frame (→)">›</button>
+        <button class="tbtn" id="btnFwd10" title="Forward 10 frames (Shift+→)">»</button>
+        <button class="tbtn" id="btnEnd" title="Last frame (End)">⏭</button>
+      </div>
+      <div class="tmid">
+        <span class="readout"><span class="lbl">FRAME</span><input id="frameInput" value="0" title="Type a frame number and press Enter"><span class="muted" id="frameTotal">/ 0</span></span>
+        <span class="readout"><span class="lbl">TC</span><span id="tc">00:00:00:00</span></span>
+        <span class="readout"><span class="lbl">SEC</span><span id="secs">0.000</span></span>
+      </div>
+      <div class="tright">
+        <button class="btn sm speedbtn" id="btnSpeed" title="Click to cycle speed: 1x, 1.5x, 2x, 2.5x, 3x, 0.5x (S)">1x</button>
+        <input type="range" id="speedRange" min="0.25" max="3" step="0.05" value="1" title="Playback speed">
+        <span class="vsep"></span>
+        <button class="tbtn" id="btnLoop" title="Loop">⟲</button>
+        <button class="tbtn" id="btnMute" title="Mute (M)">🔊</button>
+        <input type="range" id="vol" min="0" max="1" step="0.05" value="1">
+        <span class="muted small" id="meta"></span>
+      </div>
+    </div>
+  </main>
+
+  <!-- RIGHT: remarks -->
+  <aside id="notes">
+    <div class="notes-head">
+      <div class="nh-title">Remarks <span id="noteCount" class="pill">0</span></div>
+      <button class="btn sm ghost" id="btnSort" title="Sort remarks: by timecode ascending, descending, or newest first">TC ↑</button>
+      <div class="seg" id="filterSeg"><button data-f="open" class="on">Open</button><button data-f="all">All</button><button data-f="done">Done</button></div>
+    </div>
+    <div class="agent-box">
+      <button class="btn primary block" id="btnCopyPath" title="Copy the path of notes.md for this version. Paste it to any agent.">⧉ Copy notes file path</button>
+      <div class="row2">
+        <button class="btn block" id="btnCopyOpen" title="Copy all open remarks as Markdown">Copy open remarks</button>
+        <button class="btn block" id="btnOpenNotes" title="Open notes.md">Open notes.md</button>
+      </div>
+      <div id="notesPathText" class="path small"></div>
+      <div id="changedWarn" class="warn hidden">This video file changed after these notes were written. Frames may have shifted.</div>
+    </div>
+
+    <div class="composer">
+      <div class="comp-head"><span id="compFrame">Remark at frame 0</span><span class="muted small" id="compShapes"></span></div>
+      <textarea id="noteText" placeholder="Type a remark for this frame… (C to focus, Ctrl+Enter to save)&#10;Ctrl+Q / W / E: bring back your last / 2nd-last / 3rd-last remark"></textarea>
+      <div class="comp-actions">
+        <button class="btn sm ghost" id="btnSetEnd" title="Make this a range remark ending at the current frame">Set end here</button>
+        <span id="rangeTxt" class="muted small"></span>
+        <span class="grow"></span>
+        <button class="btn sm ghost" id="btnCancelDraft">Cancel</button>
+        <button class="btn sm primary" id="btnSave">Save remark</button>
+      </div>
+    </div>
+
+    <div id="noteList" class="note-list"></div>
+    <div class="keys muted small">
+      Space play · ←/→ frame · Shift ±10 · J K L · [ ] prev/next remark · S speed · Ctrl+Q/W/E recall last remarks · B brush · R box · A arrow · C comment · Ctrl+Z undo
+    </div>
+  </aside>
+</div>
+
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h3 id="modalTitle">New project</h3>
+    <input id="modalInput" placeholder="Project name">
+    <div class="modal-actions"><button class="btn ghost" id="modalCancel">Cancel</button><button class="btn primary" id="modalOk">Create</button></div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<script src="renderer.js"></script>
+</body>
+</html>

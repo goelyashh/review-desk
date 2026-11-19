@@ -1,0 +1,18 @@
+{
+  "name": "review-desk",
+  "productName": "Review Desk",
+  "version": "1.0.0",
+  "description": "Local Frame.io-style video review: projects, versions, frame notes, drawings, agent-ready notes files.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "package": "electron-packager . \"Review Desk\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=src/icon.ico --ignore=^/dist --ignore=^/test --ignore=^/userdata"
+  },
+  "author": "goelyashh",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^33.2.1"
+  }
+}
