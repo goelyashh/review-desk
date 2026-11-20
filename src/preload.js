@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('api', {
   copy: call('copy'), reveal: call('reveal'), openPath: call('open-path'),
   recentAdd: call('recent-add'), recentClear: call('recent-clear'),
   chooseRoot: call('choose-root'), projectCreate: call('project-create'),
-  pickVideos: call('pick-videos'), importVideos: call('import'),
+  pickVideos: call('pick-videos'), importVideos: call('import'), expandDrop: call('expand-drop'),
   capture: call('capture'), test: call('test'), selftestDone: call('selftest-done'),
   filePath: (f) => webUtils.getPathForFile(f),
   on: (ch, fn) => ipcRenderer.on(ch, (_e, d) => fn(d)),

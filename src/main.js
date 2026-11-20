@@ -364,6 +364,20 @@ function registerIpc() {
     return r.canceled ? [] : r.filePaths;
   });
   ipcMain.handle('import', (_e, projectDir, files) => importInto(projectDir, files));
+  ipcMain.handle('expand-drop', async (_e, paths) => {
+    const out = [];
+    for (const p of paths) {
+      try {
+        const st = await fsp.stat(p);
+        if (st.isDirectory()) {
+          const videos = (await fsp.readdir(p, { withFileTypes: true }))
+            .filter(f => f.isFile() && VIDEO_EXT.has(path.extname(f.name).toLowerCase())).map(f => path.join(p, f.name));
+          out.push({ path: p, isDir: true, name: path.basename(p), videos });
+        } else if (VIDEO_EXT.has(path.extname(p).toLowerCase())) out.push({ path: p, isDir: false });
+      } catch {}
+    }
+    return out;
+  });
   ipcMain.handle('capture', async (_e, file) => {
     const img = await win.webContents.capturePage();
     await fsp.mkdir(path.dirname(file), { recursive: true });

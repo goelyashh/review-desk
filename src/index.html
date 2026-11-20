@@ -95,6 +95,8 @@
         <button class="btn sm speedbtn" id="btnSpeed" title="Click to cycle speed: 1x, 1.5x, 2x, 2.5x, 3x, 0.5x (S)">1x</button>
         <input type="range" id="speedRange" min="0.25" max="3" step="0.05" value="1" title="Playback speed">
         <span class="vsep"></span>
+        <button class="tbtn" id="btnQuickPaste" title="Paste-to-save: text pasted while no text box is selected (e.g. from Wispr Flow) is saved at once as a remark at the current frame. Click to turn off/on">🎙</button>
+        <button class="tbtn" id="btnWheel" title="Mouse wheel over the video or timeline steps frames (down = forward, Shift = 10). Click to turn off/on">🖱</button>
         <button class="tbtn" id="btnLoop" title="Loop">⟲</button>
         <button class="tbtn" id="btnMute" title="Mute (M)">🔊</button>
         <input type="range" id="vol" min="0" max="1" step="0.05" value="1">
@@ -134,7 +136,7 @@
 
     <div id="noteList" class="note-list"></div>
     <div class="keys muted small">
-      Space play · ←/→ frame · Shift ±10 · J K L · [ ] prev/next remark · S speed · Ctrl+Q/W/E recall last remarks · B brush · R box · A arrow · C comment · Ctrl+Z undo
+      Space play · ←/→ or wheel frame · Shift ±10 · J K L · [ ] prev/next remark · S speed · Ctrl+Q/W/E recall last remarks · paste/dictate anywhere = save remark · B brush · R box · A arrow · C comment · Ctrl+Z undo
     </div>
   </aside>
 </div>

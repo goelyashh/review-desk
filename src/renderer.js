@@ -47,7 +47,7 @@ function renderSide() {
     if (q && !p.name.toLowerCase().includes(q)) continue;
     const open = p.versions.reduce((a, v) => a + v.open, 0);
     const isOpen = S.expanded.has(p.path) || (S.cur && S.cur.projectPath === p.path);
-    const box = document.createElement('div'); box.className = 'proj';
+    const box = document.createElement('div'); box.className = 'proj'; box.dataset.path = p.path; box.dataset.name = p.name;
     box.innerHTML = `<div class="proj-head"><span class="caret">${isOpen ? '▾' : '▸'}</span><span class="pname" title="${esc(p.path)}">${esc(p.name)}</span>
       ${open ? `<span class="badge open" title="Open remarks">${open}</span>` : ''}<span class="badge" title="Versions">${p.versions.length}</span>
       <button class="btn sm ghost padd" title="Add versions to this project">+</button></div>`;
@@ -100,10 +100,8 @@ async function openByPath(p) {
 
 // ---------- open a version ----------
 async function openVersion(project, v, opts = {}) {
-  if (S.draft.shapes.length || $('noteText').value.trim()) {
-    if (!opts.force && !confirmDiscard()) return;
-  }
-  clearDraft();
+  // an unsaved remark stays stored for its own version (see saveDraftLocal), so nothing to confirm
+  S.keepDraft = true; clearDraft(); S.keepDraft = false;
   video.pause();
   S.cur = { project: project.name, projectPath: project.path, version: v, versions: project.versions };
   S.expanded.add(project.path);
@@ -131,6 +129,7 @@ async function openVersion(project, v, opts = {}) {
   if (proxy) await setSource(proxy, true);
   else if (unplayable) { video.removeAttribute('src'); video.load(); offerProxy(`This file is ${info.codec} (${info.pixFmt}), which the player can't decode.`); }
   else await setSource(v.path, false);
+  restoreDraft();
   const rec = await api.recentAdd({ path: v.path, project: project.name, version: v.name, at: Date.now() });
   S.recents = rec; renderSide();
 }
@@ -310,13 +309,33 @@ function setTool(t) {
 function startDraft() { S.draft.frame = S.frame; updateComposer(); }
 function clearDraft() { S.draft = { shapes: [], frame: null, frameEnd: null }; $('noteText').value = ''; updateComposer(); redraw(); }
 function confirmDiscard() { return window.confirm('Discard the unsaved remark?'); }
+// the remark being written is kept per version in the app's storage until it is saved or cancelled
+const draftKey = () => S.cur && 'draft:' + S.cur.version.path.toLowerCase();
+function saveDraftLocal() {
+  if (S.keepDraft || !S.cur) return;
+  try {
+    const text = $('noteText').value;
+    if (!text.trim() && !S.draft.shapes.length) localStorage.removeItem(draftKey());
+    else localStorage.setItem(draftKey(), JSON.stringify({ ...S.draft, frame: S.draft.frame ?? S.frame, text, saved: Date.now() }));
+  } catch {}
+}
+function restoreDraft() {
+  let d = null; try { d = JSON.parse(localStorage.getItem(draftKey()) || 'null'); } catch {}
+  if (!d || (!String(d.text || '').trim() && !(d.shapes || []).length)) return;
+  S.draft = { shapes: d.shapes || [], frame: d.frame ?? 0, frameEnd: d.frameEnd ?? null };
+  $('noteText').value = d.text || '';
+  updateComposer(); seekFrame(S.draft.frame);
+  toast('Restored your unsaved remark');
+}
 function updateComposer() {
+  saveDraftLocal();
   const f = S.draft.frame ?? S.frame;
   $('compFrame').textContent = `Remark at frame ${f} · ${tc(f)}`;
   const n = S.draft.shapes.length;
   $('compShapes').textContent = n ? `${n} drawing${n > 1 ? 's' : ''}` : '';
   $('rangeTxt').textContent = S.draft.frameEnd != null ? `to frame ${S.draft.frameEnd}` : '';
 }
+$('noteText').addEventListener('input', saveDraftLocal);
 $('noteText').addEventListener('focus', () => { if (!video.paused) video.pause(); if (S.draft.frame == null) startDraft(); });
 $('noteText').addEventListener('blur', () => { if (!$('noteText').value.trim() && !S.draft.shapes.length && S.draft.frame != null) { S.draft.frame = null; S.draft.frameEnd = null; updateComposer(); } });
 $('btnSetEnd').onclick = () => {
@@ -346,7 +365,7 @@ function waitPresented() {
     setTimeout(fin, 2500);
   });
 }
-async function saveRemark() {
+async function saveRemark(quick = false) {
   if (!S.cur) return;
   const text = $('noteText').value.trim();
   if (!text && !S.draft.shapes.length) { toast('Write a remark or draw something first'); return; }
@@ -361,7 +380,8 @@ async function saveRemark() {
   clearDraft();
   await persist();
   S.sel = note.id; renderNotes();
-  toast('Remark saved');
+  if (quick) savedFeedback(note); else toast('Remark saved');
+  return note;
 }
 async function persist() {
   await api.notesSave(S.doc);
@@ -387,6 +407,7 @@ function renderNotes() {
     const idx = all.indexOf(n) + 1;
     const el = document.createElement('div');
     el.className = 'note' + (n.id === S.sel ? ' sel' : '') + (n.status === 'done' ? ' done' : '');
+    el.dataset.id = n.id;
     const range = n.frameEnd != null && n.frameEnd > n.frame ? `–${n.frameEnd}` : '';
     const shp = (n.shapes || []).length ? `<div class="shp">${n.shapes.map(s => ({ pen: 'brush', rect: 'box', arrow: 'arrow' }[s.type])).join(', ')}</div>` : '';
     el.innerHTML = `<div class="nhead"><span class="chk ${n.status === 'done' ? 'on' : ''}" title="${n.status === 'done' ? 'Resolved: click to reopen' : 'Click to resolve'}">${n.status === 'done' ? '✓' : ''}</span><span class="num">#${idx}</span><span class="fr">F ${n.frame}${range} · ${tc(n.frame)}</span></div>
@@ -478,6 +499,7 @@ $('btnCopyLib').onclick = () => { api.copy(S.root + '\\_review-index.md'); toast
 $('btnChangeLib').onclick = async () => { const r = await api.chooseRoot(); if (r) { resetView(); await refresh(); toast('Library changed'); } };
 function resetView() {
   video.pause(); video.removeAttribute('src'); video.load();
+  S.keepDraft = true; clearDraft(); S.keepDraft = false;
   S.cur = null; S.doc = null; S.sel = null; S.frame = 0; S.frames = 0; clearDraft(); hideMsg();
   $('empty').classList.remove('hidden'); $('crumbProject').textContent = 'No video open'; $('crumbVersion').textContent = '';
   $('notesPathText').textContent = ''; $('meta').textContent = ''; $('proxyState').textContent = '';
@@ -501,25 +523,50 @@ async function addVersions(projectDir, files) {
   const v = p && p.versions.find(v => v.path === added[added.length - 1]);
   if (v) openVersion(p, v);
 }
-function askName(title, ok, cb) {
-  $('modalTitle').textContent = title; $('modalOk').textContent = ok; $('modalInput').value = '';
+function askName(title, ok, cb, value = '') {
+  $('modalTitle').textContent = title; $('modalOk').textContent = ok; $('modalInput').value = value;
   $('modal').classList.remove('hidden'); $('modalInput').focus();
   const close = () => $('modal').classList.add('hidden');
   $('modalOk').onclick = () => { const v = $('modalInput').value.trim(); close(); if (v) cb(v); };
   $('modalCancel').onclick = close;
   $('modalInput').onkeydown = (e) => { if (e.key === 'Enter') $('modalOk').click(); if (e.key === 'Escape') close(); e.stopPropagation(); };
 }
-// drag and drop videos onto the window
+// drag and drop videos (or folders of videos) onto the window
+//   onto a project in the sidebar -> added to that project
+//   onto empty sidebar space      -> a new project
+//   onto the player               -> the open project (or a new one if nothing is open)
+//   a dropped folder              -> a project named after the folder (unless dropped onto a project)
 let dragDepth = 0;
-window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; $('dropHint').classList.remove('hidden'); });
-window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('dropHint').classList.add('hidden'); } });
-window.addEventListener('dragover', (e) => e.preventDefault());
+function dropTarget(e) {
+  const box = e.target.closest && e.target.closest('.proj');
+  if (box && box.dataset.path) return { dir: box.dataset.path, name: box.dataset.name, box };
+  if (e.target.closest && e.target.closest('#side')) return { newProject: true };
+  if (S.cur) return { dir: S.cur.projectPath, name: S.cur.project };
+  return { newProject: true };
+}
+function clearDropMarks() { document.querySelectorAll('.proj.droptarget').forEach(b => b.classList.remove('droptarget')); }
+window.addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; });
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('dropHint').classList.add('hidden'); clearDropMarks(); } });
+window.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const t = dropTarget(e);
+  clearDropMarks(); if (t.box) t.box.classList.add('droptarget');
+  $('dropHint').textContent = t.newProject ? 'Drop to make a new project (a folder becomes a project named after it)' : `Drop to add as versions of "${t.name}"`;
+  $('dropHint').classList.remove('hidden');
+});
 window.addEventListener('drop', async (e) => {
-  e.preventDefault(); dragDepth = 0; $('dropHint').classList.add('hidden');
-  const files = [...e.dataTransfer.files].map(f => api.filePath(f)).filter(p => /\.(mp4|mov|m4v|webm|mkv|avi|mxf)$/i.test(p));
-  if (!files.length) return toast('No video files in that drop');
-  if (S.cur) return addVersions(S.cur.projectPath, files);
-  askName('New project for these videos', 'Create & add', async (name) => { const d = await api.projectCreate(name); if (d) addVersions(d, files); });
+  e.preventDefault(); dragDepth = 0; $('dropHint').classList.add('hidden'); clearDropMarks();
+  const t = dropTarget(e);
+  const items = await api.expandDrop([...e.dataTransfer.files].map(f => api.filePath(f)).filter(Boolean));
+  const loose = items.filter(i => !i.isDir).map(i => i.path);
+  const folders = items.filter(i => i.isDir && i.videos.length);
+  if (!loose.length && !folders.length) return toast('No video files in that drop');
+  if (!t.newProject) return addVersions(t.dir, [...loose, ...folders.flatMap(f => f.videos)]);
+  for (const f of folders) { const d = await api.projectCreate(f.name); if (d) await addVersions(d, f.videos); }
+  if (loose.length) {
+    const guess = loose[0].split(/[\\/]/).pop().replace(/\.[^.]+$/, '').replace(/[ _-]*v?\d+$/i, '').trim();
+    askName('New project for these videos', 'Create & add', async (name) => { const d = await api.projectCreate(name); if (d) addVersions(d, loose); }, guess);
+  }
 });
 api.on('library-changed', () => refresh());
 
@@ -528,6 +575,23 @@ $('btnPlay').onclick = togglePlay;
 $('btnBack').onclick = () => step(-1); $('btnFwd').onclick = () => step(1);
 $('btnBack10').onclick = () => step(-10); $('btnFwd10').onclick = () => step(10);
 $('btnStart').onclick = () => seekFrame(0); $('btnEnd').onclick = () => seekFrame(S.frames - 1);
+// mouse wheel over the video or timeline: down = forward, up = back, Shift = 10 frames
+try { S.wheel = localStorage.getItem('wheel') !== 'off'; } catch { S.wheel = true; }
+$('btnWheel').classList.toggle('on', S.wheel);
+$('btnWheel').onclick = () => { S.wheel = !S.wheel; $('btnWheel').classList.toggle('on', S.wheel); try { localStorage.setItem('wheel', S.wheel ? 'on' : 'off'); } catch {} toast(S.wheel ? 'Wheel steps frames' : 'Wheel scrubbing off'); };
+let wheelAcc = 0;
+function onWheel(e) {
+  if (!S.wheel || !S.cur || e.ctrlKey) return;
+  e.preventDefault();
+  // Shift turns a vertical wheel into deltaX on Windows, so read whichever axis moved
+  let d = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+  if (e.deltaMode === 1) d *= 40; else if (e.deltaMode === 2) d *= 400;
+  // one mouse-wheel click = exactly one step; small trackpad deltas add up to one
+  if (Math.abs(d) >= 50) wheelAcc = 0; else { wheelAcc += d; if (Math.abs(wheelAcc) < 50) return; d = wheelAcc; wheelAcc = 0; }
+  step(Math.sign(d) * (e.shiftKey ? 10 : 1));
+}
+$('stage').addEventListener('wheel', onWheel, { passive: false });
+$('timeline').addEventListener('wheel', onWheel, { passive: false });
 $('btnLoop').onclick = () => { S.loop = !S.loop; $('btnLoop').classList.toggle('on', S.loop); };
 $('btnMute').onclick = () => { video.muted = !video.muted; $('btnMute').textContent = video.muted ? '🔇' : '🔊'; };
 $('vol').oninput = (e) => { video.volume = +e.target.value; };
@@ -556,6 +620,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.activeElement === $('noteText')) { $('noteText').blur(); return; }
   if (typing() || !$('modal').classList.contains('hidden')) return;
   const k = e.key;
+  if ((e.ctrlKey || e.metaKey || e.altKey) && k.length === 1) { if ((k === 'z' || k === 'Z') && e.ctrlKey) $('btnUndo').click(); return; }
   if (k === ' ') { e.preventDefault(); togglePlay(); }
   else if (k === 'ArrowRight') { e.preventDefault(); step(e.shiftKey ? 10 : 1); }
   else if (k === 'ArrowLeft') { e.preventDefault(); step(e.shiftKey ? -10 : -1); }
@@ -575,6 +640,61 @@ document.addEventListener('keydown', (e) => {
   else if (k === 'm' || k === 'M') $('btnMute').click();
   else if ((k === 'z' || k === 'Z') && e.ctrlKey) $('btnUndo').click();
 });
+
+// ---------- paste = instant remark (for dictation apps like Wispr Flow) ----------
+// Text pasted while no text box has focus is saved straight away as a remark at the current frame,
+// together with anything already drawn or typed in the composer.
+try { S.quickPaste = localStorage.getItem('quickPaste') !== 'off'; } catch { S.quickPaste = true; }
+function syncQuickPaste() { $('btnQuickPaste').classList.toggle('on', S.quickPaste); }
+syncQuickPaste();
+$('btnQuickPaste').onclick = () => {
+  S.quickPaste = !S.quickPaste; syncQuickPaste();
+  try { localStorage.setItem('quickPaste', S.quickPaste ? 'on' : 'off'); } catch {}
+  toast(S.quickPaste ? 'Paste anywhere saves a remark' : 'Paste-to-save off');
+};
+document.addEventListener('paste', (e) => {
+  if (!S.quickPaste || typing() || !$('modal').classList.contains('hidden')) return;
+  const t = ((e.clipboardData && e.clipboardData.getData('text/plain')) || '').trim();
+  if (!t) return;
+  e.preventDefault();
+  if (!S.cur) return toast('Open a video first, then paste or dictate a remark');
+  quickRemark(t);
+});
+let quickBusy = Promise.resolve();
+function quickRemark(t) {
+  // queue them so two quick dictations can't collide
+  quickBusy = quickBusy.then(async () => {
+    if (!video.paused) { video.pause(); seekFrame(frameFromTime(video.currentTime)); }
+    const before = $('noteText').value.trim();
+    $('noteText').value = before ? before + ' ' + t : t;
+    if (S.draft.frame == null) S.draft.frame = S.frame;
+    await saveRemark(true);
+  }).catch(e => { console.error(e); toast('Could not save that remark'); });
+  return quickBusy;
+}
+let audioCtx = null;
+function chime() {
+  try {
+    audioCtx = audioCtx || new AudioContext();
+    const t0 = audioCtx.currentTime;
+    [880, 1320].forEach((f, i) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t0 + i * 0.09);
+      g.gain.exponentialRampToValueAtTime(0.12, t0 + i * 0.09 + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + i * 0.09 + 0.22);
+      o.connect(g).connect(audioCtx.destination); o.start(t0 + i * 0.09); o.stop(t0 + i * 0.09 + 0.25);
+    });
+  } catch {}
+}
+function savedFeedback(note) {
+  const words = note.text.length > 46 ? note.text.slice(0, 44) + '…' : note.text;
+  toast(`✓ Saved at frame ${note.frame} · ${note.tc} — "${words}"`);
+  const fb = $('frameBox'); fb.classList.remove('savedflash'); void fb.offsetWidth; fb.classList.add('savedflash');
+  chime();
+  const el = document.querySelector(`.note[data-id="${note.id}"]`);
+  if (el) { el.scrollIntoView({ block: 'nearest' }); el.classList.add('justsaved'); setTimeout(() => el.classList.remove('justsaved'), 1600); }
+}
 
 // ---------- boot ----------
 (async () => {
@@ -636,6 +756,35 @@ async function selftest(videoPath) {
   await settle();
   result.captures.push(await api.capture(`${out}notes_panel.png`));
   result.recallOk = S.doc.notes.length === 2 && S.doc.notes[1].frame === 150 && S.doc.notes[1].shapes.length === 3;
+  // an unsaved remark survives re-opening the version (same storage survives an app restart)
+  seekFrame(77); await settle(); $('noteText').focus(); $('noteText').value = 'unsaved draft'; $('noteText').dispatchEvent(new Event('input')); $('noteText').blur();
+  await openVersion(pseudo, v, { force: true }); await settle();
+  result.draft = { text: $('noteText').value, frame: S.draft.frame, playhead: S.frame };
+  result.draftOk = result.draft.text === 'unsaved draft' && S.draft.frame === 77 && S.frame === 77;
+  $('btnCancelDraft').click(); await settle();
+  result.draftClearedOk = !$('noteText').value && !localStorage.getItem(draftKey());
+  const ex = await api.expandDrop([videoPath.replace(/[\\/][^\\/]+$/, ''), videoPath, videoPath + '.nope']);
+  result.expandDrop = ex.map(i => ({ isDir: i.isDir, name: i.name, n: i.videos && i.videos.length }));
+  // real Ctrl+V with no text box focused saves a remark at the current frame
+  seekFrame(120); setTool('rect'); await settle(); document.activeElement && document.activeElement.blur();
+  await api.copy('dictated remark from wispr');
+  const before = S.doc.notes.length;
+  await api.test('input', [{ type: 'keyDown', keyCode: 'V', modifiers: ['control'] }, { type: 'keyUp', keyCode: 'V', modifiers: ['control'], wait: 1500 }]);
+  await quickBusy;
+  const pn = S.doc.notes[S.doc.notes.length - 1];
+  result.paste = { added: S.doc.notes.length - before, frame: pn && pn.frame, text: pn && pn.text, tool: S.tool, composer: $('noteText').value };
+  result.pasteOk = result.paste.added === 1 && pn.frame === 120 && pn.text === 'dictated remark from wispr' && !$('noteText').value && S.tool === 'rect';
+  // real mouse-wheel input over the video: 3 clicks down = +3, 1 click up = -1, Shift+down = +10
+  seekFrame(50); await settle();
+  const sr = $('stage').getBoundingClientRect(), wx = Math.round(sr.left + sr.width / 2), wy = Math.round(sr.top + sr.height / 2);
+  const wh = (dy, mods = []) => ({ type: 'mouseWheel', x: wx, y: wy, deltaX: 0, deltaY: dy, modifiers: mods, wait: 120 });
+  await api.test('input', [{ type: 'mouseMove', x: wx, y: wy }, wh(-100), wh(-100), wh(-100)]);
+  const w1 = S.frame;
+  await api.test('input', [wh(100)]);
+  const w2 = S.frame;
+  await api.test('input', [wh(-100, ['shift'])]);
+  result.wheel = { after3down: w1, after1up: w2, afterShiftDown: S.frame };
+  result.wheelOk = (w1 === 53 && w2 === 52 && S.frame === 62) || (w1 === 47 && w2 === 48 && S.frame === 38);
   // proxy path
   const r = await api.proxyMake(videoPath, { frames: S.frames });
   result.proxy = r;
